@@ -1,0 +1,9 @@
+employee_id,punch_in_date,punch_in_time,punch_in_note,punch_out_date,punch_out_time,punch_out_note
+0002,2025-05-02,08:00,,2025-05-02,17:00,
+0002,2025-05-05,08:00,Back from leave,2025-05-05,17:00,
+0003,2025-05-01,08:30,,2025-05-01,17:30,
+0003,2025-05-02,08:00,Regular,2025-05-02,17:00,Regular
+0003,2025-05-05,09:00,Late arrival,2025-05-05,18:00,Overtime
+0005,2025-05-01,07:45,Early start,2025-05-01,16:45,Left on time
+0005,2025-05-02,08:00,Regular,2025-05-02,17:00,Regular
+0005,2025-05-05,08:15,,2025-05-05,17:15,

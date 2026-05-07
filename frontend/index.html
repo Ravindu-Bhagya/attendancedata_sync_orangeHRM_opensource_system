@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OrangeHRM Attendance Import</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div class="header-inner">
+        <div class="logo">
+          <span class="logo-icon">&#128197;</span>
+          <span class="logo-text">OrangeHRM <strong>Attendance Import</strong></span>
+        </div>
+        <span class="header-sub">CSV attendance data integration</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- ── Form panel ── -->
+      <section class="card form-card">
+        <h2 class="card-title">Import Configuration</h2>
+
+        <form id="importForm" novalidate>
+
+          <!-- Connection status bar -->
+          <div class="conn-bar" id="connBar">
+            <div class="conn-bar-left">
+              <span class="conn-dot" id="connDot"></span>
+              <span id="connLabel">Checking…</span>
+            </div>
+            <div class="conn-bar-right" id="connBarRight"></div>
+          </div>
+
+          <!-- Connect form (shown when disconnected) -->
+          <div class="connect-form" id="connectForm">
+            <div class="field-row">
+              <div class="field">
+                <label for="cUsername">OrangeHRM Username</label>
+                <input type="text" id="cUsername" value="admin" placeholder="admin" autocomplete="username">
+              </div>
+              <div class="field">
+                <label for="cPassword">Password</label>
+                <input type="password" id="cPassword" value="admin@OHRM123" placeholder="password" autocomplete="current-password">
+              </div>
+            </div>
+            <div id="connError" class="conn-error" hidden></div>
+            <button type="button" id="connectBtn" class="btn-connect-action">
+              <span id="connectBtnText">Connect to OrangeHRM</span>
+              <span id="connectBtnSpinner" class="spinner-sm" hidden></span>
+            </button>
+          </div>
+
+          <!-- CSV upload -->
+          <div class="field">
+            <label>CSV File</label>
+            <div class="drop-zone" id="dropZone">
+              <input type="file" id="csvFile" name="csv" accept=".csv" required>
+              <div class="drop-zone-label" id="dropLabel">
+                <span class="drop-icon">&#128196;</span>
+                <span>Drop CSV file here or <u>click to browse</u></span>
+              </div>
+            </div>
+            <p class="file-chosen" id="fileChosen"></p>
+          </div>
+
+          <!-- CSV format hint -->
+          <div class="format-hint">
+            <strong>Required CSV columns (in any order):</strong>
+            <code>employee_id, punch_in_date, punch_in_time, punch_in_note, punch_out_date, punch_out_time, punch_out_note</code>
+            <p class="hint-example">
+              Date format: <em>YYYY-MM-DD</em> &nbsp;|&nbsp; Time format: <em>HH:MM</em> (24-hour)
+            </p>
+            <button type="button" class="btn-sample" id="downloadSample">&#8595; Download sample CSV</button>
+          </div>
+
+          <button type="submit" id="submitBtn" disabled>
+            <span id="btnText">&#9654; Start Import</span>
+            <span id="btnSpinner" class="spinner" hidden></span>
+          </button>
+        </form>
+      </section>
+
+      <!-- ── Log panel ── -->
+      <section class="card terminal-card">
+        <div class="terminal-titlebar">
+          <span class="dot red"></span>
+          <span class="dot yellow"></span>
+          <span class="dot green"></span>
+          <span class="terminal-name">import log</span>
+          <button class="btn-clear" id="clearBtn" type="button">Clear</button>
+        </div>
+        <div class="terminal-body" id="terminal">
+          <p class="term-welcome">OrangeHRM Attendance Import &mdash; ready.<br>
+            Enter your OrangeHRM credentials and click <em>Connect</em>, then upload a CSV to begin.</p>
+        </div>
+        <div class="terminal-footer">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">Ready</span>
+        </div>
+      </section>
+    </main>
+
+    <!-- ── Summary banner ── -->
+    <div class="summary-banner" id="summaryBanner" hidden>
+      <div class="summary-inner">
+        <div id="summaryIcon" class="summary-icon">&#10003;</div>
+        <div>
+          <h3 id="summaryTitle">Import Complete</h3>
+          <p id="summaryDetail"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
