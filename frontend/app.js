@@ -27,8 +27,11 @@ const connError        = document.getElementById('connError');
 const connectBtn       = document.getElementById('connectBtn');
 const connectBtnText   = document.getElementById('connectBtnText');
 const connectBtnSpinner= document.getElementById('connectBtnSpinner');
+const cInstanceUrl     = document.getElementById('cInstanceUrl');
 const cUsername        = document.getElementById('cUsername');
 const cPassword        = document.getElementById('cPassword');
+
+let connectedBaseUrl = '';
 
 // ── Connection state ─────────────────────────────────────────────────────────
 
@@ -59,6 +62,7 @@ function setConnected(connected) {
     discBtn.textContent = 'Disconnect';
     discBtn.onclick = async () => {
       await fetch('/api/attendance/disconnect', { method: 'POST' });
+      connectedBaseUrl = '';
       checkConnection();
     };
     connBarRight.appendChild(discBtn);
@@ -70,8 +74,10 @@ function setConnected(connected) {
 }
 
 connectBtn.addEventListener('click', async () => {
+  const instanceUrl = cInstanceUrl.value.trim().replace(/\/$/, '');
   const username = cUsername.value.trim();
   const password = cPassword.value;
+  if (!instanceUrl) { showConnError('Enter the OrangeHRM instance URL'); return; }
   if (!username || !password) { showConnError('Enter username and password'); return; }
 
   connectBtnText.hidden   = true;
@@ -83,10 +89,11 @@ connectBtn.addEventListener('click', async () => {
     const r = await fetch('/api/attendance/connect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ baseUrl: instanceUrl, username, password }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Connection failed');
+    connectedBaseUrl = instanceUrl;
     setConnected(true);
   } catch (err) {
     showConnError(err.message);
@@ -189,6 +196,7 @@ form.addEventListener('submit', async (e) => {
   setStatus('running');
 
   const fd = new FormData(form);
+  if (connectedBaseUrl) fd.append('baseUrl', connectedBaseUrl);
 
   let sessionId;
   try {
