@@ -6,27 +6,39 @@ const { URL } = require('url');
 
 const agent = new https.Agent({ rejectUnauthorized: false });
 
-// ── In-memory token store ────────────────────────────────────────────────────
+// ── In-memory token + connection store ───────────────────────────────────────
 let _accessToken  = null;
 let _refreshToken = null;
 let _tokenExpiry  = 0;
+let _baseUrl      = '';
 
-function setTokens({ access_token, refresh_token, expires_in }) {
+function setTokens({ access_token, refresh_token, expires_in }, baseUrl) {
   _accessToken  = access_token;
   _refreshToken = refresh_token || null;
   _tokenExpiry  = Date.now() + (expires_in ? (expires_in - 60) * 1000 : 3600 * 1000);
+  if (baseUrl) _baseUrl = baseUrl;
 }
 
 function isTokenValid() { return !!_accessToken && Date.now() < _tokenExpiry; }
-function clearTokens()  { _accessToken = null; _refreshToken = null; _tokenExpiry = 0; }
+
+function clearTokens() {
+  _accessToken  = null;
+  _refreshToken = null;
+  _tokenExpiry  = 0;
+  _baseUrl      = '';
+}
+
+function getConnectionInfo() {
+  return { baseUrl: _baseUrl, connected: isTokenValid() };
+}
 
 // ── Low-level HTTP/HTTPS wrapper ─────────────────────────────────────────────
 
 async function rawRequest(urlStr, options = {}) {
   return new Promise((resolve, reject) => {
-    const url  = new URL(urlStr);
+    const url     = new URL(urlStr);
     const isHttps = url.protocol === 'https:';
-    const lib  = isHttps ? https : http;
+    const lib     = isHttps ? https : http;
     const bodyStr = options.body || '';
 
     const reqOptions = {
@@ -47,8 +59,8 @@ async function rawRequest(urlStr, options = {}) {
     const req = lib.request(reqOptions, (res) => {
       let body = '';
       res.setEncoding('utf8');
-      res.on('data',  (c) => (body += c));
-      res.on('end',   () => resolve({ status: res.statusCode, headers: res.headers, body }));
+      res.on('data', (c) => (body += c));
+      res.on('end',  () => resolve({ status: res.statusCode, headers: res.headers, body }));
     });
 
     req.on('error', reject);
@@ -67,21 +79,82 @@ function parseCookies(h) {
   }
   return jar;
 }
+
 function cookieHeader(jar) {
   return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
-// ── Headless OAuth2: login + authorize + token exchange ──────────────────────
-// This performs the full authorization_code flow server-side using admin credentials.
+// ── Auto-create OAuth2 client using admin session cookies ────────────────────
+// OrangeHRM's Vue SPA calls /api/v2/admin/oauth-clients with the session cookie
+// and XSRF-TOKEN, so we replicate that here after a successful admin login.
+
+async function autoCreateOAuthClient(baseUrl, jar) {
+  const PORT = process.env.PORT || 4000;
+  const redirectUri = `http://localhost:${PORT}/oauth/callback`;
+
+  const xsrfToken = decodeURIComponent(jar['XSRF-TOKEN'] || jar['xsrf-token'] || '');
+  const headers = {
+    'Content-Type':     'application/json',
+    'Accept':           'application/json',
+    'Cookie':           cookieHeader(jar),
+    'X-Requested-With': 'XMLHttpRequest',
+    'Referer':          `${baseUrl}/web/index.php/admin/oauth-clients`,
+    'Origin':           baseUrl,
+  };
+  if (xsrfToken) headers['X-XSRF-TOKEN'] = xsrfToken;
+
+  // Try a fixed name first; fall back to a timestamped name to avoid duplicate conflicts
+  const names = ['AttendanceImporter', `AttendanceImporter_${Date.now()}`];
+
+  for (const name of names) {
+    let resp;
+    try {
+      resp = await rawRequest(`${baseUrl}/web/index.php/api/v2/admin/oauth-clients`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ name, redirectUri, enabled: true, confidential: true }),
+      });
+    } catch (err) {
+      throw new Error(`Network error reaching OAuth client API: ${err.message}`);
+    }
+
+    if (resp.status === 200 || resp.status === 201) {
+      let parsed;
+      try { parsed = JSON.parse(resp.body); } catch { break; }
+      const client       = parsed?.data;
+      const clientSecret = parsed?.meta?.clientSecret;  // OrangeHRM returns secret in meta, not data
+      if (client?.clientId && clientSecret) {
+        return { clientId: client.clientId, clientSecret, redirectUri };
+      }
+    } else if (resp.status === 404) {
+      throw new Error(
+        'OAuth client API not found on this OrangeHRM instance. ' +
+        'Please provide the Client ID and Client Secret manually in Advanced Options.'
+      );
+    } else if (resp.status === 401 || resp.status === 403) {
+      throw new Error(
+        'Session-based OAuth client creation is not supported by this instance. ' +
+        'Please provide the Client ID and Client Secret manually in Advanced Options.'
+      );
+    }
+    // 400/409/422 likely means name conflict — try next name in loop
+  }
+
+  throw new Error(
+    'Could not auto-create OAuth2 client. ' +
+    'Please create one in OrangeHRM (Admin → API → OAuth Clients → Add) ' +
+    'and enter the Client ID and Client Secret in Advanced Options.'
+  );
+}
+
+// ── Headless OAuth2: login + (auto-create client) + authorize + token ─────────
 
 async function headlessConnect(baseUrl, username, password, clientId, clientSecret) {
-  const loginUrl    = `${baseUrl}/web/index.php/auth/login`;
-  const validateUrl = `${baseUrl}/web/index.php/auth/validate`;
+  const PORT = process.env.PORT || 4000;
+  const loginUrl     = `${baseUrl}/web/index.php/auth/login`;
+  const validateUrl  = `${baseUrl}/web/index.php/auth/validate`;
   const authorizeUrl = `${baseUrl}/web/index.php/oauth2/authorize`;
-  const tokenUrl    = `${baseUrl}/web/index.php/oauth2/token`;
-
-  // Internal redirect URI — we capture the code from the Location header server-side
-  const redirectUri = 'http://localhost:4000/oauth/callback';
+  const tokenUrl     = `${baseUrl}/web/index.php/oauth2/token`;
 
   // Step 1: GET login page → session cookie + CSRF token
   const lp = await rawRequest(loginUrl, {
@@ -95,12 +168,7 @@ async function headlessConnect(baseUrl, username, password, clientId, clientSecr
   const csrfToken = tm[1];
 
   // Step 2: POST credentials
-  const credBody = new URLSearchParams({
-    username,
-    password,
-    _token: csrfToken,
-  }).toString();
-
+  const credBody = new URLSearchParams({ username, password, _token: csrfToken }).toString();
   const valResp = await rawRequest(validateUrl, {
     method: 'POST',
     headers: {
@@ -112,15 +180,14 @@ async function headlessConnect(baseUrl, username, password, clientId, clientSecr
     body: credBody,
   });
 
-  // Merge new cookies
   Object.assign(jar, parseCookies(valResp.headers['set-cookie']));
-
   const valLoc = valResp.headers['location'] || '';
+
   if (valResp.status === 302 && valLoc.includes('auth/login')) {
     throw new Error('OrangeHRM rejected the credentials — check username and password');
   }
 
-  // Follow the post-login redirect to establish the full session
+  // Step 3: Follow post-login redirect to establish full session (sets XSRF-TOKEN cookie)
   if (valResp.status === 302 && valLoc) {
     const rUrl = valLoc.startsWith('http') ? valLoc : `${baseUrl}${valLoc}`;
     const rResp = await rawRequest(rUrl, {
@@ -129,10 +196,23 @@ async function headlessConnect(baseUrl, username, password, clientId, clientSecr
     Object.assign(jar, parseCookies(rResp.headers['set-cookie']));
   }
 
-  // Step 3: GET /oauth2/authorize with session cookie — should redirect with code
+  // Step 4: Obtain OAuth2 client credentials
+  // If user provided them manually, use those; otherwise auto-create via admin session
+  let effectiveClientId     = clientId;
+  let effectiveClientSecret = clientSecret;
+  let redirectUri           = `http://localhost:${PORT}/oauth/callback`;
+
+  if (!effectiveClientId || !effectiveClientSecret) {
+    const created = await autoCreateOAuthClient(baseUrl, jar);
+    effectiveClientId     = created.clientId;
+    effectiveClientSecret = created.clientSecret;
+    redirectUri           = created.redirectUri;
+  }
+
+  // Step 5: GET /oauth2/authorize with session cookie → code (or consent page)
   const authParams = new URLSearchParams({
     response_type: 'code',
-    client_id:     clientId,
+    client_id:     effectiveClientId,
     redirect_uri:  redirectUri,
   });
 
@@ -146,18 +226,21 @@ async function headlessConnect(baseUrl, username, password, clientId, clientSecr
   let code;
 
   if (authResp.status === 302 && authLoc.includes('code=')) {
-    // Auto-approved or previously approved → code in Location header
     const u = new URL(authLoc.startsWith('http') ? authLoc : `http://dummy${authLoc}`);
     code = u.searchParams.get('code');
   } else if (authResp.status === 200 && authResp.body.includes('oauth-authorize')) {
+    // Check for an inline error (e.g. invalid_client) before attempting consent
+    const errorTypeMatch = authResp.body.match(/error-type="&quot;([^&]+)&quot;"/);
+    if (errorTypeMatch) {
+      throw new Error(`OAuth2 authorization error: ${errorTypeMatch[1]} — the OAuth2 client may be invalid or not registered on this instance`);
+    }
+
     // Consent page (Vue SPA) — extract params from component props and approve
-    // The page renders: :params="{&quot;key&quot;:&quot;val&quot;,...}"
     const paramsMatch = authResp.body.match(/:params="({[^"]+})"/);
     const consentParams = new URLSearchParams({ authorized: 'true' });
 
     if (paramsMatch) {
       try {
-        // Decode HTML entities and parse JSON
         const jsonStr = paramsMatch[1]
           .replace(/&quot;/g, '"')
           .replace(/&amp;/g, '&')
@@ -165,9 +248,8 @@ async function headlessConnect(baseUrl, username, password, clientId, clientSecr
           .replace(/\\\//g, '/');
         const params = JSON.parse(jsonStr);
         for (const [k, v] of Object.entries(params)) consentParams.set(k, v);
-      } catch { /* use only authorized param */ }
+      } catch { /* fall through with just authorized=true */ }
     } else {
-      // Fallback: pass the original auth params
       for (const [k, v] of authParams.entries()) consentParams.set(k, v);
     }
 
@@ -189,11 +271,11 @@ async function headlessConnect(baseUrl, username, password, clientId, clientSecr
 
   if (!code) throw new Error('No authorization code received from OrangeHRM');
 
-  // Step 4: Exchange code for access token
+  // Step 6: Exchange code for access token
   const tokenBody = new URLSearchParams({
     grant_type:    'authorization_code',
-    client_id:     clientId,
-    client_secret: clientSecret,
+    client_id:     effectiveClientId,
+    client_secret: effectiveClientSecret,
     code,
     redirect_uri:  redirectUri,
   }).toString();
@@ -211,11 +293,11 @@ async function headlessConnect(baseUrl, username, password, clientId, clientSecr
     throw new Error(tokenData.error_description || tokenData.error || 'Token exchange failed');
   }
 
-  setTokens(tokenData);
+  setTokens(tokenData, baseUrl);
   return tokenData;
 }
 
-// ── OAuth2 callback handler (for manual browser flow fallback) ───────────────
+// ── OAuth2 callback handler (browser flow fallback) ──────────────────────────
 
 async function exchangeCodeForToken(baseUrl, clientId, clientSecret, code, redirectUri) {
   const body = new URLSearchParams({
@@ -239,7 +321,7 @@ async function exchangeCodeForToken(baseUrl, clientId, clientSecret, code, redir
     throw new Error(data.error_description || data.error || 'Token exchange failed');
   }
 
-  setTokens(data);
+  setTokens(data, baseUrl);
   return data;
 }
 
@@ -297,7 +379,6 @@ async function createAttendanceRecord(baseUrl, params) {
     timezoneName   = 'UTC',
   } = params;
 
-  // Step 1: POST punch-in
   const { status: s1, data: d1 } = await apiRequest(
     baseUrl, 'POST',
     `/attendance/employees/${empNumber}/records`,
@@ -309,7 +390,6 @@ async function createAttendanceRecord(baseUrl, params) {
     throw new Error(`Punch-in failed: ${msg}`);
   }
 
-  // Step 2: PUT punch-out (same endpoint, PUT method)
   const { status: s2, data: d2 } = await apiRequest(
     baseUrl, 'PUT',
     `/attendance/employees/${empNumber}/records`,
@@ -329,6 +409,7 @@ module.exports = {
   exchangeCodeForToken,
   isTokenValid,
   clearTokens,
+  getConnectionInfo,
   resolveEmpNumber,
   createAttendanceRecord,
 };

@@ -7,70 +7,82 @@ const {
   exchangeCodeForToken,
   isTokenValid,
   clearTokens,
+  getConnectionInfo,
   resolveEmpNumber,
   createAttendanceRecord,
 } = require('../services/ohrmService');
 const { createSession, getSession, deleteSession } = require('../services/sessions');
 
-require('dotenv').config();
-
-const OHRM_BASE_URL      = process.env.OHRM_BASE_URL      || 'https://osm320-os-kord.orangehrm.com';
-const OHRM_CLIENT_ID     = process.env.OHRM_CLIENT_ID     || '';
-const OHRM_CLIENT_SECRET = process.env.OHRM_CLIENT_SECRET || '';
-
-// POST /api/attendance/connect  — headless OAuth2 using admin credentials
+// POST /api/attendance/connect — headless OAuth2 using admin credentials
+// clientId and clientSecret are optional; if omitted the service auto-creates
+// an OAuth2 client on the target instance using the admin session.
 async function connect(req, res) {
-  const baseUrl      = (req.body.baseUrl  || OHRM_BASE_URL).replace(/\/$/, '');
+  const baseUrl      = (req.body.baseUrl || '').replace(/\/$/, '');
   const username     = req.body.username  || '';
   const password     = req.body.password  || '';
-  const clientId     = req.body.clientId  || OHRM_CLIENT_ID;
-  const clientSecret = req.body.clientSecret || OHRM_CLIENT_SECRET;
+  const clientId     = req.body.clientId  || '';
+  const clientSecret = req.body.clientSecret || '';
 
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password are required' });
-  }
+  if (!baseUrl)              return res.status(400).json({ error: 'OrangeHRM instance URL is required' });
+  if (!username || !password) return res.status(400).json({ error: 'Username and password are required' });
 
   try {
-    await headlessConnect(baseUrl, username, password, clientId, clientSecret);
+    await headlessConnect(
+      baseUrl, username, password,
+      clientId   || null,
+      clientSecret || null
+    );
     res.json({ ok: true, message: 'Connected to OrangeHRM successfully' });
   } catch (err) {
     res.status(401).json({ error: err.message });
   }
 }
 
-// GET /oauth/start  → redirect browser to OrangeHRM authorize (fallback)
+// GET /oauth/start → redirect browser to OrangeHRM authorize (fallback path)
+// Requires clientId and clientSecret as query params when no env defaults exist.
 function oauthStart(req, res) {
-  const baseUrl  = (req.query.baseUrl || OHRM_BASE_URL).replace(/\/$/, '');
-  const clientId = req.query.clientId || OHRM_CLIENT_ID;
-  const proto    = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-  const host     = req.headers.host || 'localhost:4000';
+  const baseUrl      = (req.query.baseUrl || '').replace(/\/$/, '');
+  const clientId     = req.query.clientId     || '';
+  const clientSecret = req.query.clientSecret || '';
+
+  if (!baseUrl || !clientId) {
+    return res.status(400).send('<h3>baseUrl and clientId query parameters are required</h3>');
+  }
+
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host  = req.headers.host || `localhost:${process.env.PORT || 4000}`;
   const redirectUri = `${proto}://${host}/oauth/callback`;
 
-  const state = Buffer.from(JSON.stringify({ baseUrl, clientId })).toString('base64url');
+  // clientSecret is embedded in state so oauthCallback can use it for token exchange
+  const state = Buffer.from(JSON.stringify({ baseUrl, clientId, clientSecret })).toString('base64url');
   const params = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: redirectUri, state });
   res.redirect(`${baseUrl}/web/index.php/oauth2/authorize?${params}`);
 }
 
-// GET /oauth/callback  → exchange code for token
+// GET /oauth/callback → exchange code for token
 async function oauthCallback(req, res) {
   const { code, state, error } = req.query;
   if (error) return res.send(`<h3>OAuth error: ${error}</h3><p><a href="/">Back</a></p>`);
   if (!code)  return res.send('<h3>No code received</h3><p><a href="/">Back</a></p>');
 
-  let baseUrl  = OHRM_BASE_URL;
-  let clientId = OHRM_CLIENT_ID;
+  let baseUrl = '', clientId = '', clientSecret = '';
   try {
     const s = JSON.parse(Buffer.from(state, 'base64url').toString());
-    baseUrl  = s.baseUrl  || baseUrl;
-    clientId = s.clientId || clientId;
-  } catch { /* use defaults */ }
+    baseUrl      = s.baseUrl      || '';
+    clientId     = s.clientId     || '';
+    clientSecret = s.clientSecret || '';
+  } catch { /* leave empty */ }
+
+  if (!baseUrl || !clientId || !clientSecret) {
+    return res.send('<h3>Missing OAuth parameters in state</h3><p><a href="/">Back</a></p>');
+  }
 
   const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-  const host  = req.headers.host || 'localhost:4000';
+  const host  = req.headers.host || `localhost:${process.env.PORT || 4000}`;
   const redirectUri = `${proto}://${host}/oauth/callback`;
 
   try {
-    await exchangeCodeForToken(baseUrl, clientId, OHRM_CLIENT_SECRET, code, redirectUri);
+    await exchangeCodeForToken(baseUrl, clientId, clientSecret, code, redirectUri);
     res.send(`
       <!DOCTYPE html><html><head><title>Connected</title>
       <style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f0f2f5}
@@ -89,7 +101,10 @@ async function oauthCallback(req, res) {
 }
 
 // GET /api/attendance/status
-function authStatus(req, res) { res.json({ connected: isTokenValid() }); }
+function authStatus(req, res) {
+  const { connected, baseUrl } = getConnectionInfo();
+  res.json({ connected, baseUrl: connected ? baseUrl : '' });
+}
 
 // POST /api/attendance/disconnect
 function disconnect(req, res) { clearTokens(); res.json({ ok: true }); }
@@ -100,9 +115,9 @@ async function importAttendance(req, res) {
   const csvFile = req.file;
   if (!csvFile) return res.status(400).json({ error: 'No CSV file uploaded' });
 
-  const baseUrl = (req.body.baseUrl || OHRM_BASE_URL).replace(/\/$/, '');
+  const { connected, baseUrl } = getConnectionInfo();
 
-  if (!isTokenValid()) {
+  if (!connected) {
     fs.unlink(csvFile.path, () => {});
     return res.status(401).json({ error: 'not_connected', message: 'Please connect to OrangeHRM first' });
   }
@@ -129,7 +144,7 @@ async function importAttendance(req, res) {
 
       if (records.length === 0) { emit('error', 'No valid records to import'); emitter.emit('done'); return; }
 
-      emit('info', `Importing ${records.length} record(s) into ${baseUrl} ...`);
+      emit('info', `Importing ${records.length} record(s) into ${baseUrl} …`);
 
       let succeeded = 0, failed = 0;
       const empCache = new Map();

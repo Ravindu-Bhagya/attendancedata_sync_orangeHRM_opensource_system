@@ -19,37 +19,39 @@ const summaryDetail = document.getElementById('summaryDetail');
 const summaryInner  = document.querySelector('.summary-inner');
 
 // Connection elements
-const connDot          = document.getElementById('connDot');
-const connLabel        = document.getElementById('connLabel');
-const connBarRight     = document.getElementById('connBarRight');
-const connectForm      = document.getElementById('connectForm');
-const connError        = document.getElementById('connError');
-const connectBtn       = document.getElementById('connectBtn');
-const connectBtnText   = document.getElementById('connectBtnText');
-const connectBtnSpinner= document.getElementById('connectBtnSpinner');
-const cInstanceUrl     = document.getElementById('cInstanceUrl');
-const cUsername        = document.getElementById('cUsername');
-const cPassword        = document.getElementById('cPassword');
-
-let connectedBaseUrl = '';
+const connDot           = document.getElementById('connDot');
+const connLabel         = document.getElementById('connLabel');
+const connUrl           = document.getElementById('connUrl');
+const connBarRight      = document.getElementById('connBarRight');
+const connectForm       = document.getElementById('connectForm');
+const connError         = document.getElementById('connError');
+const connectBtn        = document.getElementById('connectBtn');
+const connectBtnText    = document.getElementById('connectBtnText');
+const connectBtnSpinner = document.getElementById('connectBtnSpinner');
+const cInstanceUrl      = document.getElementById('cInstanceUrl');
+const cUsername         = document.getElementById('cUsername');
+const cPassword         = document.getElementById('cPassword');
+const cClientId         = document.getElementById('cClientId');
+const cClientSecret     = document.getElementById('cClientSecret');
 
 // ── Connection state ─────────────────────────────────────────────────────────
 
 async function checkConnection() {
   try {
     const r = await fetch('/api/attendance/status');
-    const { connected } = await r.json();
-    setConnected(connected);
+    const { connected, baseUrl } = await r.json();
+    setConnected(connected, baseUrl || '');
     return connected;
   } catch {
-    setConnected(false);
+    setConnected(false, '');
     return false;
   }
 }
 
-function setConnected(connected) {
+function setConnected(connected, baseUrl) {
   connDot.className = 'conn-dot ' + (connected ? 'ok' : 'err');
   connLabel.textContent = connected ? 'Connected to OrangeHRM' : 'Not connected';
+  connUrl.textContent = connected && baseUrl ? baseUrl : '';
 
   connBarRight.innerHTML = '';
   if (connected) {
@@ -62,8 +64,7 @@ function setConnected(connected) {
     discBtn.textContent = 'Disconnect';
     discBtn.onclick = async () => {
       await fetch('/api/attendance/disconnect', { method: 'POST' });
-      connectedBaseUrl = '';
-      checkConnection();
+      setConnected(false, '');
     };
     connBarRight.appendChild(discBtn);
   } else {
@@ -74,27 +75,33 @@ function setConnected(connected) {
 }
 
 connectBtn.addEventListener('click', async () => {
-  const instanceUrl = cInstanceUrl.value.trim().replace(/\/$/, '');
-  const username = cUsername.value.trim();
-  const password = cPassword.value;
-  if (!instanceUrl) { showConnError('Enter the OrangeHRM instance URL'); return; }
-  if (!username || !password) { showConnError('Enter username and password'); return; }
+  const instanceUrl  = cInstanceUrl.value.trim().replace(/\/$/, '');
+  const username     = cUsername.value.trim();
+  const password     = cPassword.value;
+  const clientId     = cClientId.value.trim();
+  const clientSecret = cClientSecret.value.trim();
 
-  connectBtnText.hidden   = true;
+  if (!instanceUrl)          { showConnError('Enter the OrangeHRM instance URL'); return; }
+  if (!username || !password) { showConnError('Enter admin username and password'); return; }
+
+  connectBtnText.hidden    = true;
   connectBtnSpinner.hidden = false;
-  connectBtn.disabled     = true;
-  connError.hidden        = true;
+  connectBtn.disabled      = true;
+  connError.hidden         = true;
 
   try {
+    const body = { baseUrl: instanceUrl, username, password };
+    if (clientId)     body.clientId     = clientId;
+    if (clientSecret) body.clientSecret = clientSecret;
+
     const r = await fetch('/api/attendance/connect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseUrl: instanceUrl, username, password }),
+      body: JSON.stringify(body),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Connection failed');
-    connectedBaseUrl = instanceUrl;
-    setConnected(true);
+    setConnected(true, instanceUrl);
   } catch (err) {
     showConnError(err.message);
   } finally {
@@ -157,7 +164,6 @@ function appendLine(type, text) {
 
   const p = document.createElement('p');
   p.className = `log-line log-${type}`;
-
   const prefix = { info: 'ℹ ', success: '✔ ', warn: '⚠ ', error: '✖ ', divider: '', summary: '► ' }[type] || '';
   p.textContent = prefix + text;
   terminal.appendChild(p);
@@ -195,8 +201,8 @@ form.addEventListener('submit', async (e) => {
   setBusy(true);
   setStatus('running');
 
-  const fd = new FormData(form);
-  if (connectedBaseUrl) fd.append('baseUrl', connectedBaseUrl);
+  const fd = new FormData();
+  fd.append('csv', fileInput.files[0]);
 
   let sessionId;
   try {
@@ -206,7 +212,7 @@ form.addEventListener('submit', async (e) => {
       appendLine('error', 'Not connected to OrangeHRM. Please connect first.');
       setBusy(false);
       setStatus('error');
-      setConnected(false);
+      setConnected(false, '');
       return;
     }
 

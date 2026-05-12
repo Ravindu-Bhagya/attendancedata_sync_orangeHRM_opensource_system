@@ -29,7 +29,10 @@
           <div class="conn-bar" id="connBar">
             <div class="conn-bar-left">
               <span class="conn-dot" id="connDot"></span>
-              <span id="connLabel">Checking…</span>
+              <div class="conn-label-group">
+                <span id="connLabel">Checking…</span>
+                <span id="connUrl" class="conn-url"></span>
+              </div>
             </div>
             <div class="conn-bar-right" id="connBarRight"></div>
           </div>
@@ -42,14 +45,40 @@
             </div>
             <div class="field-row">
               <div class="field">
-                <label for="cUsername">OrangeHRM Username</label>
-                <input type="text" id="cUsername" value="admin" placeholder="admin" autocomplete="username">
+                <label for="cUsername">Admin Username</label>
+                <input type="text" id="cUsername" placeholder="admin" autocomplete="username">
               </div>
               <div class="field">
-                <label for="cPassword">Password</label>
-                <input type="password" id="cPassword" value="admin@OHRM123" placeholder="password" autocomplete="current-password">
+                <label for="cPassword">Admin Password</label>
+                <input type="password" id="cPassword" placeholder="password" autocomplete="current-password">
               </div>
             </div>
+
+            <!-- Advanced Options (OAuth2 client credentials — auto-created if omitted) -->
+            <details class="advanced-section" id="advancedSection">
+              <summary>
+                <span>&#9881; Advanced Options</span>
+                <span class="advanced-badge">OAuth2 Client — optional</span>
+              </summary>
+              <div class="advanced-body">
+                <p class="advanced-note">
+                  Leave these blank to let the app auto-create an OAuth2 client using your admin session.
+                  If auto-creation fails, create a client manually in OrangeHRM under
+                  <strong>Admin &rarr; API &rarr; OAuth Clients &rarr; Add</strong> and paste the credentials below.
+                </p>
+                <div class="field-row">
+                  <div class="field">
+                    <label for="cClientId">Client ID</label>
+                    <input type="text" id="cClientId" placeholder="Leave blank for auto-create" autocomplete="off">
+                  </div>
+                  <div class="field">
+                    <label for="cClientSecret">Client Secret</label>
+                    <input type="password" id="cClientSecret" placeholder="Leave blank for auto-create" autocomplete="off">
+                  </div>
+                </div>
+              </div>
+            </details>
+
             <div id="connError" class="conn-error" hidden></div>
             <button type="button" id="connectBtn" class="btn-connect-action">
               <span id="connectBtnText">Connect to OrangeHRM</span>
@@ -98,7 +127,8 @@
         </div>
         <div class="terminal-body" id="terminal">
           <p class="term-welcome">OrangeHRM Attendance Import &mdash; ready.<br>
-            Enter your OrangeHRM credentials and click <em>Connect</em>, then upload a CSV to begin.</p>
+            Enter your OrangeHRM instance URL and admin credentials, then click <em>Connect</em>.<br>
+            OAuth2 client credentials will be auto-created if not provided.</p>
         </div>
         <div class="terminal-footer">
           <span class="status-dot" id="statusDot"></span>

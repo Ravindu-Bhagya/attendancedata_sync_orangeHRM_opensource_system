@@ -59,11 +59,14 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 
 /* ── Connection bar ──────────────────────────────────────────────────────── */
 .conn-bar { display: flex; align-items: center; justify-content: space-between; border: 1.5px solid var(--border); border-radius: 8px; padding: 10px 14px; background: #fafafa; }
-.conn-bar-left { display: flex; align-items: center; gap: 8px; font-size: .9rem; font-weight: 600; }
+.conn-bar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.conn-label-group { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.conn-label-group #connLabel { font-size: .9rem; font-weight: 600; }
+.conn-url { font-size: .75rem; color: var(--muted); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
 .conn-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: #ccc; }
 .conn-dot.ok  { background: #27c93f; box-shadow: 0 0 6px rgba(39,201,63,.4); }
 .conn-dot.err { background: #e74c3c; }
-.btn-disc { background: none; border: 1.5px solid #e74c3c; color: #e74c3c; border-radius: 6px; padding: 4px 12px; font-size: .8rem; font-weight: 600; cursor: pointer; }
+.btn-disc { background: none; border: 1.5px solid #e74c3c; color: #e74c3c; border-radius: 6px; padding: 4px 12px; font-size: .8rem; font-weight: 600; cursor: pointer; flex-shrink: 0; }
 .btn-disc:hover { background: #fdf3f3; }
 
 /* ── Connect form ────────────────────────────────────────────────────────── */
@@ -73,6 +76,16 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 .btn-connect-action:hover { opacity: .88; }
 .btn-connect-action:disabled { opacity: .5; cursor: not-allowed; }
 .spinner-sm { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+
+/* ── Advanced Options (collapsible OAuth2 credentials) ───────────────────── */
+.advanced-section { border: 1px dashed var(--border); border-radius: 7px; overflow: hidden; }
+.advanced-section summary { list-style: none; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; font-size: .82rem; font-weight: 600; color: var(--muted); cursor: pointer; user-select: none; background: #f5f5f5; gap: 8px; }
+.advanced-section summary::-webkit-details-marker { display: none; }
+.advanced-section summary:hover { background: #efefef; color: var(--text); }
+.advanced-section[open] summary { border-bottom: 1px dashed var(--border); color: var(--text); }
+.advanced-badge { font-size: .7rem; background: #e8eaf6; color: #5c6bc0; padding: 2px 8px; border-radius: 20px; font-weight: 500; margin-left: auto; white-space: nowrap; }
+.advanced-body { padding: 12px 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.advanced-note { font-size: .78rem; color: var(--muted); line-height: 1.5; background: #fffbf0; border: 1px solid #fde68a; border-radius: 6px; padding: 8px 10px; }
 
 /* ── Drop zone ───────────────────────────────────────────────────────────── */
 .drop-zone { border: 2px dashed var(--border); border-radius: 8px; position: relative; padding: 28px 16px; text-align: center; transition: border-color .2s, background .2s; cursor: pointer; }
